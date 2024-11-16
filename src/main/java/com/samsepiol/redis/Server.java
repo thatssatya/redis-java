@@ -1,39 +1,76 @@
 package com.samsepiol.redis;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import lombok.extern.slf4j.Slf4j;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+@Slf4j
 public class Server implements AutoCloseable, Closeable {
-    private static final Logger log = LogManager.getLogger(Server.class);
     private volatile Boolean running = Boolean.FALSE;
     private final ServerSocket serverSocket;
-    private final Socket clientSocket;
     private final Integer port;
-
-    private BufferedReader clientInputBufferedReader;
+    private final Map<ServerSocket, List<ExecutorService>> clientExecutorServiceMap;
 
     public Server(Integer port) throws IOException {
+        this(port, 1);
+    }
+
+    public Server(Integer port, Integer maxClients) throws IOException {
         this.port = port;
         serverSocket = getServersocket();
-        clientSocket = getClientSocket();
+        this.clientExecutorServiceMap = Map.of(serverSocket,
+                IntStream.range(0, maxClients).mapToObj(i -> connectionManager(serverSocket)).toList());
+    }
+
+    private ExecutorService connectionManager(ServerSocket socket) {
+        var executorService = Executors.newSingleThreadExecutor();
+        handleMessageFromSocketAsync(socket, executorService);
+        return executorService;
+    }
+
+    private void handleMessageFromSocketAsync(ServerSocket socket, ExecutorService executorService) {
+        CompletableFuture.runAsync(() -> {
+            try (var clientSocket = socket.accept()) {
+                try (var reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+                    while (true) {
+                        var input = reader.readLine();
+                        log.info("Received message: {}", input);
+                        handleClientMessage(input, clientSocket);
+                    }
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }, executorService);
+    }
+
+    protected void handleClientMessage(String input, Socket clientSocket) throws IOException {
+        log.info("Default message handler: {}", input);
     }
 
     protected void signalRunning() {
         running = Boolean.TRUE;
-        log.info("Server running");
     }
 
     public boolean isRunning() {
         return running;
     }
 
-    protected void write(String message) throws IOException {
-        getClientOutputStream().write(message.getBytes());
+    protected void write(String message, Socket clientSocket) throws IOException {
+        clientSocket.getOutputStream().write(message.getBytes());
     }
 
     private static synchronized ServerSocket createServerSocket(Integer port) throws IOException {
@@ -49,50 +86,12 @@ public class Server implements AutoCloseable, Closeable {
         return createServerSocket(port);
     }
 
-    private Socket createClientSocket() throws IOException {
-        return getServersocket().accept();
-    }
-
-    private Socket getClientSocket() throws IOException {
-        if (Objects.nonNull(clientSocket)) {
-            return clientSocket;
-        }
-        return createClientSocket();
-    }
-
-    private OutputStream getClientOutputStream() throws IOException {
-        return getClientSocket().getOutputStream();
-    }
-
-    private InputStream getClientInputStream() throws IOException {
-        return getClientSocket().getInputStream();
-    }
-
-    private BufferedReader getClientBufferedReader() throws IOException {
-        if (Objects.isNull(clientInputBufferedReader)) {
-            clientInputBufferedReader = new BufferedReader(new InputStreamReader(getClientInputStream()));
-        }
-        return clientInputBufferedReader;
-    }
-
-    protected String readLine() throws IOException {
-        return getClientBufferedReader().readLine();
-    }
-
     @Override
     public void close() throws IOException {
-        closeClientSocket();
         closeServerSocket();
-        closeClientInputBufferedReader();
+        clientExecutorServiceMap.values().forEach(executorServices -> executorServices.forEach(ExecutorService::shutdown));
         running = Boolean.FALSE;
         log.info("Server terminated");
-    }
-
-    private void closeClientInputBufferedReader() throws IOException {
-        if (Objects.nonNull(clientInputBufferedReader)) {
-            clientInputBufferedReader.close();
-            log.info("Client input buffer reader closed");
-        }
     }
 
     private void closeServerSocket() throws IOException {
@@ -102,10 +101,4 @@ public class Server implements AutoCloseable, Closeable {
         }
     }
 
-    private void closeClientSocket() throws IOException {
-        if (Objects.nonNull(clientSocket)) {
-            getClientSocket().close();
-            log.info("Client socket closed");
-        }
-    }
 }
