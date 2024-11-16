@@ -44,21 +44,7 @@ under the License.
       </orderEntry>
      -->  
     <output url="file://$MODULE_DIR$/target/classes"/>  
-    <output-test url="file://$MODULE_DIR$/target/test-classes"/>  
-    <orderEntry type="module-library">
-      <library>
-        <CLASSES>
-          <root url="jar:///Users/samsepiol/.m2/repository/org/apache/logging/log4j/log4j-api/2.23.1/log4j-api-2.23.1.jar!/"/>
-        </CLASSES>
-      </library>
-    </orderEntry>
-    <orderEntry type="module-library">
-      <library>
-        <CLASSES>
-          <root url="jar:///Users/samsepiol/.m2/repository/org/projectlombok/lombok/1.18.34/lombok-1.18.34.jar!/"/>
-        </CLASSES>
-      </library>
-    </orderEntry>
+    <output-test url="file://$MODULE_DIR$/target/test-classes"/> 
   </component>  
   <component name="ModuleRootManager"/>  
   <!-- If it's a war project:
