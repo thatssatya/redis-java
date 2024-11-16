@@ -1,11 +1,13 @@
+import com.samsepiol.redis.RedisServer;
+
 import java.io.IOException;
 import java.net.ServerSocket;
 
 public class Main {
     public static void main(String[] args) {
 
-//        try (var socketService = new SocketService(6379)) {
-//            socketService.write("+PONG\r\n");
+//        try (var redisServer = RedisServer.start()) {
+//            redisServer.ping();
 //        } catch (IOException e) {
 //            System.out.println("IOException: " + e.getMessage());
 //        } finally {

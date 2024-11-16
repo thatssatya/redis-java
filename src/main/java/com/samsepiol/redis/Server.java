@@ -7,19 +7,19 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Objects;
 
-public class SocketService implements AutoCloseable, Closeable {
+public class Server implements AutoCloseable, Closeable {
     private final ServerSocket serverSocket;
     private final Socket clientSocket;
     private final Integer port;
 
-    public SocketService(Integer port) throws IOException {
+    public Server(Integer port) throws IOException {
         this.port = port;
         serverSocket = getServersocket();
         clientSocket = getClientSocket();
     }
 
 
-    public void write(String message) throws IOException {
+    protected void write(String message) throws IOException {
         getClientOutputStream().write(message.getBytes());
     }
 
@@ -30,7 +30,10 @@ public class SocketService implements AutoCloseable, Closeable {
     }
 
     private ServerSocket getServersocket() throws IOException {
-        return Objects.requireNonNullElse(serverSocket, createServerSocket(port));
+        if (Objects.nonNull(serverSocket)) {
+            return serverSocket;
+        }
+        return createServerSocket(port);
     }
 
     private Socket createClientSocket() throws IOException {
@@ -38,7 +41,10 @@ public class SocketService implements AutoCloseable, Closeable {
     }
 
     private Socket getClientSocket() throws IOException {
-        return Objects.requireNonNullElse(clientSocket, createClientSocket());
+        if (Objects.nonNull(clientSocket)) {
+            return clientSocket;
+        }
+        return createClientSocket();
     }
 
     private OutputStream getClientOutputStream() throws IOException {
