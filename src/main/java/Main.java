@@ -1,4 +1,4 @@
-import com.samsepiol.redis.Application;
+import com.samsepiol.application.Application;
 
 public class Main {
     public static void main(String[] args) {
