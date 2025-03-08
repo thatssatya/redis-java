@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -87,20 +88,21 @@ public abstract class AbstractTcpServer implements TcpServer {
     private void handleClientConnectionThread(ServerSocket socket) {
         log.debug("Waiting for client connection on thread: {}", Thread.currentThread());
 
-        try (var clientSocket = socket.accept()) {
-            log.debug("Client connected: {}", clientSocket);
+        while (true) {
+            try (var clientSocket = socket.accept()) {
+                log.debug("Client connected: {}", clientSocket);
 
-            try (var inputBufferedReader = new BufferedReader(new InputStreamReader(clientInputStream(clientSocket)))) {
+                try (var inputBufferedReader = new BufferedReader(new InputStreamReader(clientInputStream(clientSocket)))) {
 
-                try (var outputStream = new DataOutputStream(clientSocket.getOutputStream())) {
+                    try (var outputStream = new DataOutputStream(clientSocket.getOutputStream())) {
 
-                    handleClientMessageOnLoop(clientSocket, inputBufferedReader, outputStream);
+                        handleClientMessageOnLoop(clientSocket, inputBufferedReader, outputStream);
+                    }
                 }
+            } catch (IOException e) {
+                log.debug("Error while handling client connection: ", e);
+                throw ServerRuntimeException.wrap(e);
             }
-            handleClientConnectionThread(socket);
-
-        } catch (IOException e) {
-            throw ServerRuntimeException.wrap(e);
         }
     }
 
@@ -111,17 +113,22 @@ public abstract class AbstractTcpServer implements TcpServer {
         while (true) {
             Thread.onSpinWait();
 
-            log.debug("Waiting for message from client: {}", clientSocket);
-            var input = readInputFromClient(inputBufferedReader);
+            try {
+                log.debug("Waiting for message from client: {}", clientSocket);
+                var input = readInputFromClient(inputBufferedReader);
 
-            if (clientSocket.isClosed() || clientSocket.isInputShutdown() || Objects.isNull(input)) {
-                log.info("Client disconnected");
+                if (clientSocket.isClosed() || clientSocket.isInputShutdown() || Objects.isNull(input)) {
+                    log.info("Client disconnected");
+                    break;
+                }
+
+                log.info("Received message from client: {}: {}", clientSocket, input);
+
+                writeOutputToClient(input, outputStream);
+            } catch (SocketException socketException) {
+                log.debug("Client disconnected: ", socketException);
                 break;
             }
-
-            log.info("Received message from client: {}: {}", clientSocket, input);
-
-            writeOutputToClient(input, outputStream);
         }
     }
 
