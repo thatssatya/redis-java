@@ -7,8 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -60,6 +62,14 @@ public abstract class AbstractTcpServer implements TcpServer {
         log.info("Server terminated");
     }
 
+    private static InputStream clientInputStream(Socket clientSocket) throws IOException {
+        return clientSocket.getInputStream();
+    }
+
+    private static String readInputFromClient(BufferedReader reader) throws IOException {
+        return reader.readLine();
+    }
+
     private List<ExecutorService> clientConnectionManagers(ServerSocket socket,
                                                            ThreadFactory threadFactory) {
         return IntStream.range(0, maxClients)
@@ -67,50 +77,55 @@ public abstract class AbstractTcpServer implements TcpServer {
                     var executorService = Objects.nonNull(threadFactory)
                             ? Executors.newThreadPerTaskExecutor(threadFactory)
                             : Executors.newVirtualThreadPerTaskExecutor();
-                    CompletableFuture.runAsync(() -> handleClientMessage(socket), executorService);
+                    CompletableFuture.runAsync(() -> handleClientConnectionThread(socket), executorService);
                     log.info("{} connection manager {} started!", serverName, i + 1);
                     return executorService;
                 })
                 .toList();
     }
 
-    private void handleClientMessage(ServerSocket socket) {
+    private void handleClientConnectionThread(ServerSocket socket) {
         log.debug("Waiting for client connection on thread: {}", Thread.currentThread());
 
         try (var clientSocket = socket.accept()) {
             log.debug("Client connected: {}", clientSocket);
 
-            try (var inputBufferedReader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+            try (var inputBufferedReader = new BufferedReader(new InputStreamReader(clientInputStream(clientSocket)))) {
 
                 try (var outputStream = new DataOutputStream(clientSocket.getOutputStream())) {
 
-                    while (true) {
-                        Thread.onSpinWait();
-
-                        log.debug("Waiting for message from client: {}", clientSocket);
-                        var input = readInput(inputBufferedReader);
-                        if (clientSocket.isClosed() || clientSocket.isInputShutdown() || Objects.isNull(input)) {
-                            log.info("Client disconnected");
-                            break;
-                        }
-                        log.info("Received message from client: {}: {}", clientSocket, input);
-
-                        handleClientMessage(input, outputStream);
-                    }
+                    handleClientMessageOnLoop(clientSocket, inputBufferedReader, outputStream);
                 }
             }
-            handleClientMessage(socket);
+            handleClientConnectionThread(socket);
 
         } catch (IOException e) {
             throw ServerRuntimeException.wrap(e);
         }
     }
 
-    private static String readInput(BufferedReader reader) throws IOException {
-        return reader.readLine();
+    private void handleClientMessageOnLoop(Socket clientSocket,
+                                           BufferedReader inputBufferedReader,
+                                           DataOutputStream outputStream) throws IOException {
+
+        while (true) {
+            Thread.onSpinWait();
+
+            log.debug("Waiting for message from client: {}", clientSocket);
+            var input = readInputFromClient(inputBufferedReader);
+
+            if (clientSocket.isClosed() || clientSocket.isInputShutdown() || Objects.isNull(input)) {
+                log.info("Client disconnected");
+                break;
+            }
+
+            log.info("Received message from client: {}: {}", clientSocket, input);
+
+            writeOutputToClient(input, outputStream);
+        }
     }
 
-    private void handleClientMessage(String input, DataOutputStream outputStream) throws IOException {
+    private void writeOutputToClient(String input, DataOutputStream outputStream) throws IOException {
         var outputMessage = outputMessage(input);
 
         if (Objects.isNull(outputMessage)) {
@@ -130,13 +145,16 @@ public abstract class AbstractTcpServer implements TcpServer {
     }
 
     private void closeServerSocket() throws IOException {
-        if (Objects.nonNull(serverSocket)) {
+        if (serverSocketAvailable()) {
             getServerSocket().close();
             log.info("Server socket closed");
         }
     }
 
     private synchronized ServerSocket createServerSocket() {
+        if (serverSocketAvailable()) {
+            return serverSocket;
+        }
         try {
             var socket = new ServerSocket(this.port);
             socket.setReuseAddress(true);
@@ -147,10 +165,15 @@ public abstract class AbstractTcpServer implements TcpServer {
     }
 
     private ServerSocket getServerSocket() {
-        if (Objects.nonNull(serverSocket)) {
-            return serverSocket;
-        }
-        return createServerSocket();
+        return serverSocketAvailable() ? serverSocket : createServerSocket();
+    }
+
+    private boolean serverSocketAvailable() {
+        return Objects.nonNull(serverSocket) && serverSocketOpen();
+    }
+
+    private boolean serverSocketOpen() {
+        return !serverSocket.isClosed();
     }
 
 }
